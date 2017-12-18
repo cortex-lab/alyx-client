@@ -2,7 +2,9 @@ import json
 import os
 import os.path as op
 from pprint import pprint
+import shutil
 import sys
+from textwrap import fill
 
 import click
 import requests as rq
@@ -42,12 +44,32 @@ def is_authenticated():
     return True if get_token() else False
 
 
-def table(data):
-    if isinstance(data, dict):
-        table = [[key, value] for key, value in data.items()]
+def _simple_table(data):
+    assert isinstance(data, dict)
+    table = [[key, '{0: <50}'.format(fill(str(value), 50))] for key, value in data.items()]
     st = SingleTable(table)
     st.inner_heading_row_border = False
     return st.table
+
+
+def get_table(data):
+    if not data:
+        return ''
+    tsize = shutil.get_terminal_size((80, 20))
+    twidth = tsize.columns
+    if isinstance(data, dict):
+        return _simple_table(data)
+    elif isinstance(data, list):
+        keys = data[0].keys()
+        table = [[key for key in keys]]
+        st = SingleTable(table)
+        if st.table_width <= twidth:
+            for item in data:
+                table.append([item[key] for key in keys])
+            st.inner_heading_row_border = False
+            return st.table
+        else:
+            return '\n\n'.join(get_table(item) for item in data)
 
 
 class AlyxClient:
@@ -75,9 +97,15 @@ class AlyxClient:
         resp = getattr(rq, method)(url, **kwargs)
         if resp.status_code == 200:
             return json.loads(resp.text)
+        else:
+            print(resp)
 
-    def get(self, url):
-        return self._request(url, 'get')
+    def get(self, url, **data):
+        import urllib.parse as urlparse
+        parsed = urlparse.urlparse(url)
+        data = {key: value[0] for key, value in urlparse.parse_qs(parsed.query).items()}
+        url = url[:url.find('?')]
+        return self._request(url, 'get', params=data)
 
     def post(self, url, **data):
         return self._request(url, 'post', data=data)
@@ -118,7 +146,7 @@ def alyx(ctx):
 @click.pass_context
 def get(ctx, path):
     client = ctx.obj['client']
-    click.echo(table(client.get(path)))
+    click.echo(get_table(client.get(path)))
 
 
 if __name__ == '__main__':
