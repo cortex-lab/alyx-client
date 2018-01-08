@@ -1,8 +1,11 @@
+from itertools import groupby
 import json
 import logging
+from operator import itemgetter
 import os
 import os.path as op
 from pprint import pprint
+import re
 import shutil
 import sys
 from textwrap import fill
@@ -47,6 +50,10 @@ def get_token():
 
 def is_authenticated():
     return True if get_token() else False
+
+
+def _extract_uuid(url):
+    return re.search(r'\/([a-zA-Z0-9\-]+)$', url).group(1)
 
 
 def _simple_table(data):
@@ -99,27 +106,24 @@ class AlyxClient:
             path = path[1:]
         return BASE_URL + path
 
-    def _request(self, url, method, data=None, **kwargs):
+    def _request(self, url, method, **kwargs):
         if not url.startswith('http'):
             url = self._make_end_point(url)
         if self._token:
             kwargs['headers'] = {'Authorization': 'Token ' + self._token}
-
-        parsed = urlparse.urlparse(url)
-        data = data or {}
-        data.update({key: value[0] for key, value in urlparse.parse_qs(parsed.query).items()})
-        if '?' in url:
-            url = url[:url.find('?')]
-
-        logger.info(f"{method.upper()} request to {url} with data {data}")
-        resp = getattr(rq, method)(url, data=data, **kwargs)
+        logger.debug(f"{method.upper()} request to {url} with data {kwargs}")
+        resp = getattr(rq, method)(url, **kwargs)
         if resp.status_code == 200:
-            return json.loads(resp.text)
+            output = resp.text
+            # output = output.replace(BASE_URL, '/')
+            return json.loads(output)
         else:
             print(resp)
 
     def get(self, url, **data):
-        return self._request(url, 'get', data=data)
+        if data:
+            url = url + '?' + '&'.join(f'{key}={value}' for key, value in data.items())
+        return self._request(url, 'get')
 
     def post(self, url, **data):
         return self._request(url, 'post', data=data)
@@ -195,6 +199,30 @@ def put(ctx, path, kvpairs):
 @click.pass_context
 def patch(ctx, path, kvpairs):
     return _request('patch', ctx, path, kvpairs)
+
+
+def transfers_required(dataset=None):
+    c = AlyxClient()
+    if not dataset:
+        files = c.get('/files', exists=False)
+    else:
+        files = c.get('/files', exists=False, dataset=dataset)
+    files = files[-10:]
+    files = sorted(files, key=itemgetter('dataset'))
+    for dataset, missing_files in groupby(files, itemgetter('dataset')):
+        existing_files = c.get('/files', dataset=_extract_uuid(dataset), exists=True)
+        if not existing_files:
+            continue
+        existing_file = existing_files[0]
+        for missing_file in missing_files:
+            assert existing_file['exists']
+            assert not missing_file['exists']
+            o = {}
+            for k, v in existing_file.items():
+                o['existing_' + k] = v
+            for k, v in missing_file.items():
+                o['missing_' + k] = v
+            yield o
 
 
 if __name__ == '__main__':

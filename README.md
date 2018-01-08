@@ -22,6 +22,8 @@ alyx get /sessions
 alyx get /subjects/CBGADCre1/datasets?filter=value
 ```
 
+Note: if the URL has a `&` in it, put the entire URL between double quotes to avoid the shell interpreting it as a "background job" symbol.
+
 Other supported commands include `alyx post`, `alyx put`, `alyx patch`.
 
 #### Python API
