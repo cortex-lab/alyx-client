@@ -12,7 +12,7 @@ The Alyx Python client provides a simple API and command-line interface to inter
 
 (work in progress)
 
-Create a `credentials` text file in this directory containing `username:password`. The Alyx client will then handle authentication automatically.
+Create a `~/.alyx/credentials` text file containing `username:password`. The Alyx client will then handle authentication automatically.
 
 #### Command-line interface
 

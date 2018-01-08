@@ -1,14 +1,19 @@
 import json
+import logging
 import os
 import os.path as op
 from pprint import pprint
 import shutil
 import sys
 from textwrap import fill
+import urllib.parse as urlparse
 
 import click
 import requests as rq
 from terminaltables import SingleTable
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 BASE_URL = 'http://alyx-dev.cortexlab.net/'
@@ -46,7 +51,7 @@ def is_authenticated():
 
 def _simple_table(data):
     assert isinstance(data, dict)
-    table = [[key, '{0: <50}'.format(fill(str(value), 50))] for key, value in data.items()]
+    table = [[key, '{0: <72}'.format(fill(str(value), 72))] for key, value in data.items()]
     st = SingleTable(table)
     st.inner_heading_row_border = False
     return st.table
@@ -61,7 +66,12 @@ def get_table(data):
         return _simple_table(data)
     elif isinstance(data, list):
         keys = data[0].keys()
+        # Display the header and first item, and check whether it fits in the terminal.
+        # If it does not, the output cannot be displayed in a single table, but every item
+        # will be displayed in its own little table.
         table = [[key for key in keys]]
+        if data:
+            table.append([data[0][key] for key in keys])
         st = SingleTable(table)
         if st.table_width <= twidth:
             for item in data:
@@ -78,7 +88,7 @@ class AlyxClient:
     def __init__(self):
         if not is_authenticated():
             # Open credentials, a text file in '.' with just <username>:<password>
-            with open('credentials', 'r') as f:
+            with open(op.expanduser('~/.alyx/credentials'), 'r') as f:
                 username, password = f.read().strip().split(':')
             # This command saves a ~/.alyx/auth-token.json file with a token.
             self.auth(username, password)
@@ -89,23 +99,27 @@ class AlyxClient:
             path = path[1:]
         return BASE_URL + path
 
-    def _request(self, url, method, **kwargs):
+    def _request(self, url, method, data=None, **kwargs):
         if not url.startswith('http'):
             url = self._make_end_point(url)
         if self._token:
             kwargs['headers'] = {'Authorization': 'Token ' + self._token}
-        resp = getattr(rq, method)(url, **kwargs)
+
+        parsed = urlparse.urlparse(url)
+        data = data or {}
+        data.update({key: value[0] for key, value in urlparse.parse_qs(parsed.query).items()})
+        if '?' in url:
+            url = url[:url.find('?')]
+
+        logger.info(f"{method.upper()} request to {url} with data {data}")
+        resp = getattr(rq, method)(url, data=data, **kwargs)
         if resp.status_code == 200:
             return json.loads(resp.text)
         else:
             print(resp)
 
     def get(self, url, **data):
-        import urllib.parse as urlparse
-        parsed = urlparse.urlparse(url)
-        data = {key: value[0] for key, value in urlparse.parse_qs(parsed.query).items()}
-        url = url[:url.find('?')]
-        return self._request(url, 'get', params=data)
+        return self._request(url, 'get', data=data)
 
     def post(self, url, **data):
         return self._request(url, 'post', data=data)
@@ -141,12 +155,46 @@ def alyx(ctx):
     pass
 
 
+def _request(name, ctx, path, kvpairs):
+    data = {}
+    for kvpair in kvpairs:
+        i = kvpair.index('=')
+        key, value = kvpair[:i], kvpair[i + 1:]
+        data[key] = value
+    client = ctx.obj['client']
+    click.echo(get_table(getattr(client, name)(path, **data)))
+
+
 @alyx.command()
 @click.argument('path')
+@click.argument('kvpairs', nargs=-1)
 @click.pass_context
-def get(ctx, path):
-    client = ctx.obj['client']
-    click.echo(get_table(client.get(path)))
+def get(ctx, path, kvpairs):
+    return _request('get', ctx, path, kvpairs)
+
+
+@alyx.command()
+@click.argument('path')
+@click.argument('kvpairs', nargs=-1)
+@click.pass_context
+def post(ctx, path, kvpairs):
+    return _request('post', ctx, path, kvpairs)
+
+
+@alyx.command()
+@click.argument('path')
+@click.argument('kvpairs', nargs=-1)
+@click.pass_context
+def put(ctx, path, kvpairs):
+    return _request('put', ctx, path, kvpairs)
+
+
+@alyx.command()
+@click.argument('path')
+@click.argument('kvpairs', nargs=-1)
+@click.pass_context
+def patch(ctx, path, kvpairs):
+    return _request('patch', ctx, path, kvpairs)
 
 
 if __name__ == '__main__':
