@@ -12,16 +12,19 @@ from textwrap import fill
 import urllib.parse as urlparse
 
 import click
+import globus_sdk
 import requests as rq
 from terminaltables import SingleTable
 
-logging.basicConfig(level=logging.INFO)
+
+# logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 BASE_URL = 'http://alyx-dev.cortexlab.net/'
 BASE_URL = 'http://localhost:8000/'  # test
 CONFIG_PATH = '~/.alyx'
+GLOBUS_CLIENT_ID = '525cc517-8ccb-4d11-8036-af332da5eafd'
 
 
 def get_config_path(path=''):
@@ -31,7 +34,7 @@ def get_config_path(path=''):
 
 
 def get_token_path():
-    return get_config_path('auth-token.json')
+    return get_config_path('alyx-token.json')
 
 
 def write_token(data):
@@ -207,7 +210,6 @@ def transfers_required(dataset=None):
         files = c.get('/files', exists=False)
     else:
         files = c.get('/files', exists=False, dataset=dataset)
-    files = files[-10:]
     files = sorted(files, key=itemgetter('dataset'))
     for dataset, missing_files in groupby(files, itemgetter('dataset')):
         existing_files = c.get('/files', dataset=_extract_uuid(dataset), exists=True)
@@ -223,6 +225,49 @@ def transfers_required(dataset=None):
             for k, v in missing_file.items():
                 o['missing_' + k] = v
             yield o
+
+
+def create_globus_client():
+    client = globus_sdk.NativeAppAuthClient(GLOBUS_CLIENT_ID)
+    client.oauth2_start_flow(refresh_tokens=True)
+    return client
+
+
+def create_globus_token():
+    client = create_globus_client()
+    print('Please go to this URL and login: {0}'
+          .format(client.oauth2_get_authorize_url()))
+    get_input = getattr(__builtins__, 'raw_input', input)
+    auth_code = get_input('Please enter the code here: ').strip()
+    token_response = client.oauth2_exchange_code_for_tokens(auth_code)
+    globus_transfer_data = token_response.by_resource_server['transfer.api.globus.org']
+
+    data = dict(transfer_rt=globus_transfer_data['refresh_token'],
+                transfer_at=globus_transfer_data['access_token'],
+                expires_at_s=globus_transfer_data['expires_at_seconds'],
+                )
+    path = get_config_path('globus-token.json')
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+
+
+def get_globus_transfer_rt():
+    path = get_config_path('globus-token.json')
+    if not op.exists(path):
+        return
+    with open(path, 'r') as f:
+        return json.load(f).get('transfer_rt', None)
+
+
+def globus_transfer_client():
+    transfer_rt = get_globus_transfer_rt()
+    if not transfer_rt:
+        create_globus_token()
+        transfer_rt = get_globus_transfer_rt()
+    client = create_globus_client()
+    authorizer = globus_sdk.RefreshTokenAuthorizer(transfer_rt, client)
+    tc = globus_sdk.TransferClient(authorizer=authorizer)
+    return tc
 
 
 if __name__ == '__main__':
