@@ -270,17 +270,31 @@ def globus_transfer_client():
     return tc
 
 
-def start_globus_transfer(source_id, destination_id, path):
+def start_globus_transfer(source_file_id, destination_file_id):
+    """Start a globus file transfer between two file record UUIDs."""
+    c = AlyxClient()
+
+    source_file_record = c.get('/files/' + source_file_id)
+    destination_file_record = c.get('/files/' + destination_file_id)
+
+    source_repo = source_file_record['data_repository']
+    destination_repo = destination_file_record['data_repository']
+
+    source_id = c.get('/data-repository/' + source_repo)['globus_endpoint_id']
+    destination_id = c.get('/data-repository/' + destination_repo)['globus_endpoint_id']
+
+    source_path = source_file_record['relative_path']
+    destination_path = destination_file_record['relative_path']
+
     tc = globus_transfer_client()
-    # source_file, destination_file
     tdata = globus_sdk.TransferData(tc,
                                     source_id,
                                     destination_id,
                                     verify_checksum='checksum',
                                     sync_level="checksum",
                                     )
-    tdata.add_item(path, path)
-    return tc.submit_transfer(tdata)
+    tdata.add_item(source_path, destination_path)
+    # return tc.submit_transfer(tdata)
 
 
 if __name__ == '__main__':
