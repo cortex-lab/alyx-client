@@ -270,5 +270,18 @@ def globus_transfer_client():
     return tc
 
 
+def start_globus_transfer(source_id, destination_id, path):
+    tc = globus_transfer_client()
+    # source_file, destination_file
+    tdata = globus_sdk.TransferData(tc,
+                                    source_id,
+                                    destination_id,
+                                    verify_checksum='checksum',
+                                    sync_level="checksum",
+                                    )
+    tdata.add_item(path, path)
+    return tc.submit_transfer(tdata)
+
+
 if __name__ == '__main__':
     alyx(obj={})
