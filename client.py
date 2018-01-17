@@ -17,12 +17,12 @@ import requests as rq
 from terminaltables import SingleTable
 
 
-# logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
-BASE_URL = 'http://alyx-dev.cortexlab.net/'
-BASE_URL = 'http://localhost:8000/'  # test
+BASE_URL = 'https://alyx-dev.cortexlab.net/'
+# BASE_URL = 'http://localhost:8000/'  # test
 CONFIG_PATH = '~/.alyx'
 GLOBUS_CLIENT_ID = '525cc517-8ccb-4d11-8036-af332da5eafd'
 
