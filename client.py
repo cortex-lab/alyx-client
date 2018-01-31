@@ -17,12 +17,12 @@ import requests as rq
 from terminaltables import SingleTable
 
 
-# logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
 BASE_URL = 'https://alyx-dev.cortexlab.net/'
-# BASE_URL = 'http://localhost:8000/'  # test
+BASE_URL = 'http://localhost:8000/'  # test
 CONFIG_PATH = '~/.alyx'
 GLOBUS_CLIENT_ID = '525cc517-8ccb-4d11-8036-af332da5eafd'
 
@@ -40,7 +40,9 @@ def get_token_path():
 def write_token(data):
     with open(get_token_path(), 'w') as f:
         json.dump(data, f, indent=2, sort_keys=True)
-    return data.get('token', None)
+    token = data.get('token', None)
+    logger.debug(f"Write token {token}.")
+    return token
 
 
 def get_token():
@@ -48,11 +50,9 @@ def get_token():
     if not op.exists(path):
         return
     with open(path, 'r') as f:
-        return json.load(f).get('token', '')
-
-
-def is_authenticated():
-    return True if get_token() else False
+        token = json.load(f).get('token', '')
+    logger.debug(f"Read token {token}.")
+    return token
 
 
 def _extract_uuid(url):
@@ -96,12 +96,6 @@ class AlyxClient:
     _token = ''
 
     def __init__(self):
-        if not is_authenticated():
-            # Open credentials, a text file in '.' with just <username>:<password>
-            with open(op.expanduser('~/.alyx/credentials'), 'r') as f:
-                username, password = f.read().strip().split(':')
-            # This command saves a ~/.alyx/auth-token.json file with a token.
-            self.auth(username, password)
         self._token = get_token()
 
     def _make_end_point(self, path=''):
@@ -112,39 +106,61 @@ class AlyxClient:
     def _request(self, url, method, **kwargs):
         if not url.startswith('http'):
             url = self._make_end_point(url)
-        if self._token:
-            kwargs['headers'] = {'Authorization': 'Token ' + self._token}
-        logger.debug(f"{method.upper()} request to {url} with data {kwargs}")
-        resp = getattr(rq, method)(url, **kwargs)
-        if resp.status_code == 200:
-            output = resp.text
-            # output = output.replace(BASE_URL, '/')
-            return json.loads(output)
-        else:
-            print(resp)
+        for i in range(3):
+            if self._token:
+                kwargs['headers'] = {'Authorization': 'Token ' + self._token}
+            logger.debug(f"{method.upper()} request to {url} with data {kwargs}")
+            resp = getattr(rq, method)(url, **kwargs)
+            if resp.status_code == 403:
+                self._clear_token()
+                self._auto_auth()
+            elif resp.status_code == 200:
+                return resp
+        raise Exception(resp.text)
 
     def get(self, url, **data):
         if data:
             url = url + '?' + '&'.join(f'{key}={value}' for key, value in data.items())
-        return self._request(url, 'get')
+        return self._process_response(self._request(url, 'get'))
 
     def post(self, url, **data):
-        return self._request(url, 'post', data=data)
+        return self._process_response(self._request(url, 'post', data=data))
 
     def put(self, url, **data):
-        return self._request(url, 'put', data=data)
+        return self._process_response(self._request(url, 'put', data=data))
 
     def patch(self, url, **data):
-        return self._request(url, 'patch', data=data)
+        return self._process_response(self._request(url, 'patch', data=data))
 
-    def auth(self, username, password):
-        if is_authenticated():
-            return
+    def _clear_token(self):
+        self._token = None
+        path = get_token_path()
+        if op.exists(path):
+            logger.debug(f"Remove token at {path}")
+            os.remove(path)
+
+    def _process_response(self, resp):
+        if resp and resp.status_code == 200:
+            output = resp.text
+            # output = output.replace(BASE_URL, '/')
+            return json.loads(output)
+        else:
+            raise Exception(resp)
+
+    def _auth(self, username, password):
         url = self._make_end_point('/auth-token/')
         resp = self.post(url, username=username, password=password)
         if not resp:
             return
         return write_token(resp)
+
+    def _auto_auth(self):
+        # Open credentials, a text file in '.' with just <username>:<password>
+        with open(op.expanduser('~/.alyx/credentials'), 'r') as f:
+            username, password = f.read().strip().split(':')
+        # This command saves a ~/.alyx/auth-token.json file with a token.
+        self._auth(username, password)
+        self._token = get_token()
 
 
 @click.group()
@@ -299,3 +315,4 @@ def start_globus_transfer(source_file_id, destination_file_id):
 
 if __name__ == '__main__':
     alyx(obj={})
+    # AlyxClient().is_authenticated()
