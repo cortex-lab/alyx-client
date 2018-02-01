@@ -4,7 +4,7 @@ import logging
 from operator import itemgetter
 import os
 import os.path as op
-from pprint import pprint
+from pprint import pprint, pformat
 import re
 import shutil
 import sys
@@ -14,7 +14,7 @@ import urllib.parse as urlparse
 import click
 import globus_sdk
 import requests as rq
-from terminaltables import SingleTable
+from terminaltables import SingleTable, AsciiTable
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -25,6 +25,7 @@ BASE_URL = 'https://alyx-dev.cortexlab.net/'
 BASE_URL = 'http://localhost:8000/'  # test
 CONFIG_PATH = '~/.alyx'
 GLOBUS_CLIENT_ID = '525cc517-8ccb-4d11-8036-af332da5eafd'
+TABLE_WIDTH = '{0: <72}'
 
 
 def get_config_path(path=''):
@@ -59,10 +60,18 @@ def _extract_uuid(url):
     return re.search(r'\/([a-zA-Z0-9\-]+)$', url).group(1)
 
 
+def _pp(value):
+    if isinstance(value, list):
+        out = '\n'.join((_simple_table(row)) for row in value)
+        return '\n'.join(TABLE_WIDTH.format(line) for line in out.splitlines())
+    else:
+        return TABLE_WIDTH.format(str(value))
+
+
 def _simple_table(data):
     assert isinstance(data, dict)
-    table = [[key, '{0: <72}'.format(fill(str(value), 72))] for key, value in data.items()]
-    st = SingleTable(table)
+    table = [[key, _pp(value)] for key, value in data.items()]
+    st = AsciiTable(table)
     st.inner_heading_row_border = False
     return st.table
 
@@ -82,7 +91,7 @@ def get_table(data):
         table = [[key for key in keys]]
         if data:
             table.append([data[0][key] for key in keys])
-        st = SingleTable(table)
+        st = AsciiTable(table)
         for item in data:
             table.append([item[key] for key in keys])
         st.inner_heading_row_border = False
@@ -106,7 +115,7 @@ class AlyxClient:
     def _request(self, url, method, **kwargs):
         if not url.startswith('http'):
             url = self._make_end_point(url)
-        for i in range(3):
+        for i in range(1):
             if self._token:
                 kwargs['headers'] = {'Authorization': 'Token ' + self._token}
             logger.debug(f"{method.upper()} request to {url} with data {kwargs}")
