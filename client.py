@@ -83,10 +83,10 @@ def get_table(data):
         if data:
             table.append([data[0][key] for key in keys])
         st = SingleTable(table)
+        for item in data:
+            table.append([item[key] for key in keys])
+        st.inner_heading_row_border = False
         if st.table_width <= twidth:
-            for item in data:
-                table.append([item[key] for key in keys])
-            st.inner_heading_row_border = False
             return st.table
         else:
             return '\n\n'.join(get_table(item) for item in data)
