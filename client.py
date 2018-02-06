@@ -236,6 +236,7 @@ def transfers_required(dataset=None):
     else:
         files = c.get('/files', exists=False, dataset=dataset)
     files = sorted(files, key=itemgetter('dataset'))
+    files = files[-10:]
     for dataset, missing_files in groupby(files, itemgetter('dataset')):
         existing_files = c.get('/files', dataset=_extract_uuid(dataset), exists=True)
         if not existing_files:
@@ -244,12 +245,15 @@ def transfers_required(dataset=None):
         for missing_file in missing_files:
             assert existing_file['exists']
             assert not missing_file['exists']
-            o = {}
-            for k, v in existing_file.items():
-                o['existing_' + k] = v
-            for k, v in missing_file.items():
-                o['missing_' + k] = v
-            yield o
+            yield {
+                'dataset': dataset,
+                'source_data_repository': existing_file['data_repository'],
+                'destination_data_repository': missing_file['data_repository'],
+                'source_relative_path': existing_file['relative_path'],
+                'destination_relative_path': missing_file['relative_path'],
+                'source_file_record': _extract_uuid(existing_file['url']),
+                'destination_file_record': _extract_uuid(missing_file['url']),
+            }
 
 
 def create_globus_client():
@@ -295,7 +299,7 @@ def globus_transfer_client():
     return tc
 
 
-def start_globus_transfer(source_file_id, destination_file_id):
+def start_globus_transfer(source_file_id, destination_file_id, dry_run=False):
     """Start a globus file transfer between two file record UUIDs."""
     c = AlyxClient()
 
@@ -308,20 +312,44 @@ def start_globus_transfer(source_file_id, destination_file_id):
     source_id = c.get('/data-repository/' + source_repo)['globus_endpoint_id']
     destination_id = c.get('/data-repository/' + destination_repo)['globus_endpoint_id']
 
+    if not source_id and not destination_id:
+        raise Exception("The Globus endpoint ids of source and destination must be set.")
+
     source_path = source_file_record['relative_path']
     destination_path = destination_file_record['relative_path']
 
     tc = globus_transfer_client()
-    tdata = globus_sdk.TransferData(tc,
-                                    source_id,
-                                    destination_id,
-                                    verify_checksum='checksum',
-                                    sync_level="checksum",
-                                    )
+    tdata = globus_sdk.TransferData(
+        tc, source_id, destination_id, verify_checksum='checksum', sync_level='checksum',
+    )
     tdata.add_item(source_path, destination_path)
-    # return tc.submit_transfer(tdata)
+
+    logger.debug(tdata)
+
+    dry_run = True
+    if not dry_run:
+        return tc.submit_transfer(tdata)
+
+
+@alyx.command()
+@click.argument('source', required=False, metavar='source_file_record_uuid')
+@click.argument('destination', required=False, metavar='destination_file_record_uuid')
+@click.option('--all', is_flag=True, help='Process all missing file records')
+@click.option('--dataset', help='Process all missing file records of a particular dataset')
+@click.option('--dry-run', is_flag=True,
+              help='Just display the transfers instead of launching them')
+@click.pass_context
+def transfer(ctx, source=None, destination=None, all=False, dataset=None, dry_run=False):
+    if source and destination:
+        start_globus_transfer(source, destination, dry_run=dry_run)
+        return
+
+    for dset in transfers_required(dataset):
+        print(dset)
+        start_globus_transfer(dset['source_file_record'],
+                              dset['destination_file_record'],
+                              dry_run=dry_run)
 
 
 if __name__ == '__main__':
     alyx(obj={})
-    # AlyxClient().is_authenticated()
