@@ -123,7 +123,7 @@ class AlyxClient:
             if resp.status_code == 403:
                 self._clear_token()
                 self._auto_auth()
-            elif resp.status_code == 200:
+            elif resp.status_code in (200, 201):
                 return resp
         raise Exception(resp.text)
 
@@ -149,7 +149,7 @@ class AlyxClient:
             os.remove(path)
 
     def _process_response(self, resp):
-        if resp and resp.status_code == 200:
+        if resp and resp.status_code in (200, 201):
             output = resp.text
             # output = output.replace(BASE_URL, '/')
             return json.loads(output)
