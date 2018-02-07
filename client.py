@@ -17,8 +17,9 @@ import requests as rq
 from terminaltables import SingleTable, AsciiTable
 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARN)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 BASE_URL = 'https://alyx-dev.cortexlab.net/'
@@ -57,7 +58,10 @@ def get_token():
 
 
 def _extract_uuid(url):
-    return re.search(r'\/([a-zA-Z0-9\-]+)$', url).group(1)
+    if 'http' in url:
+        return re.search(r'\/([a-zA-Z0-9\-]+)$', url).group(1)
+    else:
+        return url
 
 
 def _pp(value):
@@ -85,12 +89,7 @@ def get_table(data):
         return _simple_table(data)
     elif isinstance(data, list):
         keys = data[0].keys()
-        # Display the header and first item, and check whether it fits in the terminal.
-        # If it does not, the output cannot be displayed in a single table, but every item
-        # will be displayed in its own little table.
         table = [[key for key in keys]]
-        if data:
-            table.append([data[0][key] for key in keys])
         st = AsciiTable(table)
         for item in data:
             table.append([item[key] for key in keys])
@@ -98,6 +97,7 @@ def get_table(data):
         if st.table_width <= twidth:
             return st.table
         else:
+            # If the table does not fit on the terminal, display a single table per item.
             return '\n\n'.join(get_table(item) for item in data)
 
 
@@ -125,6 +125,8 @@ class AlyxClient:
                 self._auto_auth()
             elif resp.status_code in (200, 201):
                 return resp
+            elif resp.status_code == 404:
+                raise Exception("The REST endpoint %s doesn't exist." % url)
         raise Exception(resp.text)
 
     def get(self, url, **data):
@@ -309,8 +311,11 @@ def start_globus_transfer(source_file_id, destination_file_id, dry_run=False):
     source_repo = source_file_record['data_repository']
     destination_repo = destination_file_record['data_repository']
 
-    source_id = c.get('/data-repository/' + source_repo)['globus_endpoint_id']
-    destination_id = c.get('/data-repository/' + destination_repo)['globus_endpoint_id']
+    source_repo_obj = c.get('/data-repository/' + source_repo)
+    destination_repo_obj = c.get('/data-repository/' + destination_repo)
+
+    source_id = source_repo_obj['globus_endpoint_id']
+    destination_id = destination_repo_obj['globus_endpoint_id']
 
     if not source_id and not destination_id:
         raise Exception("The Globus endpoint ids of source and destination must be set.")
@@ -320,13 +325,13 @@ def start_globus_transfer(source_file_id, destination_file_id, dry_run=False):
 
     tc = globus_transfer_client()
     tdata = globus_sdk.TransferData(
-        tc, source_id, destination_id, verify_checksum='checksum', sync_level='checksum',
+        tc, source_id, destination_id, verify_checksum=True, sync_level='checksum',
     )
     tdata.add_item(source_path, destination_path)
 
-    logger.debug(tdata)
+    logger.info("Transfer from %s <%s> to %s <%s>." % (
+        source_repo, source_path, destination_repo, destination_path))
 
-    dry_run = True
     if not dry_run:
         return tc.submit_transfer(tdata)
 
@@ -344,10 +349,10 @@ def transfer(ctx, source=None, destination=None, all=False, dataset=None, dry_ru
         start_globus_transfer(source, destination, dry_run=dry_run)
         return
 
-    for dset in transfers_required(dataset):
-        print(dset)
-        start_globus_transfer(dset['source_file_record'],
-                              dset['destination_file_record'],
+    dataset = _extract_uuid(dataset)
+    for file in transfers_required(dataset):
+        start_globus_transfer(file['source_file_record'],
+                              file['destination_file_record'],
                               dry_run=dry_run)
 
 
