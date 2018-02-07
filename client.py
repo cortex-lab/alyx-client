@@ -323,9 +323,12 @@ def start_globus_transfer(source_file_id, destination_file_id, dry_run=False):
     source_path = source_file_record['relative_path']
     destination_path = destination_file_record['relative_path']
 
-    label = 'Transfer %s from %s to %s' % (
+    label = 'Transfer %s:%s to %s/%s' % (
         source_path.replace('.', '-').replace('/', '-'),
-        source_repo, destination_repo)
+        source_repo,
+        destination_path.replace('.', '-').replace('/', '-'),
+        destination_repo,
+    )
     tc = globus_transfer_client()
     tdata = globus_sdk.TransferData(
         tc, source_id, destination_id, verify_checksum=True, sync_level='checksum',
@@ -371,6 +374,17 @@ def transfer(ctx, source=None, destination=None, all=False, dataset=None, dry_ru
         start_globus_transfer(file['source_file_record'],
                               file['destination_file_record'],
                               dry_run=dry_run)
+
+
+@alyx.command()
+@click.argument('task_id', required=True, metavar='task_id')
+@click.pass_context
+def status(ctx, task_id):
+    tc = globus_transfer_client()
+    result = tc.get_task(task_id)
+    keys = ('status,label,source_endpoint_display_name,destination_endpoint_display_name,'
+            'request_time,completion_time,files,bytes_transferred').split(',')
+    click.echo(_simple_table({k: result[k] for k in keys}))
 
 
 if __name__ == '__main__':
