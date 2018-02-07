@@ -115,7 +115,7 @@ class AlyxClient:
     def _request(self, url, method, **kwargs):
         if not url.startswith('http'):
             url = self._make_end_point(url)
-        for i in range(1):
+        for i in range(3):
             if self._token:
                 kwargs['headers'] = {'Authorization': 'Token ' + self._token}
             logger.debug(f"{method.upper()} request to {url} with data {kwargs}")
@@ -333,11 +333,24 @@ def start_globus_transfer(source_file_id, destination_file_id, dry_run=False):
     )
     tdata.add_item(source_path, destination_path)
 
-    logger.info("Transfer from %s <%s> to %s <%s>." % (
-        source_repo, source_path, destination_repo, destination_path))
+    # DEBUG
+    dry_run = True
 
-    if not dry_run:
-        return tc.submit_transfer(tdata)
+    logger.info("Transfer from %s <%s> to %s <%s>%s.",
+                source_repo, source_path, destination_repo, destination_path,
+                ' (dry)' if dry_run else '')
+
+    if dry_run:
+        return
+
+    response = tc.submit_transfer(tdata)
+
+    task_id = response.get('task_id', None)
+    message = response.get('message', None)
+    code = response.get('code', None)
+
+    logger.info("%s (task UUID: %s)", message, task_id)
+    return response
 
 
 @alyx.command()

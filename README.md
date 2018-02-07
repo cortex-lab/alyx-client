@@ -1,6 +1,6 @@
 # alyx-client (work in progress)
 
-The Alyx Python client provides a simple API and command-line interface to interrogate the Alyx server via the REST API.
+The Alyx Python client provides a simple API and command-line interface to query the Alyx server via the REST API, and to manage file transfers with Globus.
 
 ### Features
 
