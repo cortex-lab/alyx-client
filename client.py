@@ -323,9 +323,13 @@ def start_globus_transfer(source_file_id, destination_file_id, dry_run=False):
     source_path = source_file_record['relative_path']
     destination_path = destination_file_record['relative_path']
 
+    label = 'Transfer %s from %s to %s' % (
+        source_path.replace('.', '-').replace('/', '-'),
+        source_repo, destination_repo)
     tc = globus_transfer_client()
     tdata = globus_sdk.TransferData(
         tc, source_id, destination_id, verify_checksum=True, sync_level='checksum',
+        label=label,
     )
     tdata.add_item(source_path, destination_path)
 
