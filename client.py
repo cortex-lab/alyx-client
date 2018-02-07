@@ -58,6 +58,8 @@ def get_token():
 
 
 def _extract_uuid(url):
+    if url is None:
+        return None
     if 'http' in url:
         return re.search(r'\/([a-zA-Z0-9\-]+)$', url).group(1)
     else:
@@ -231,19 +233,27 @@ def patch(ctx, path, kvpairs):
     return _request('patch', ctx, path, kvpairs)
 
 
+def _get_files(c, dataset=None, exists=None):
+    if not dataset:
+        files = c.get('/files', exists=exists)
+    else:
+        files = c.get('/files', exists=exists, dataset=dataset)
+    files = sorted(files, key=itemgetter('dataset'))
+    return files
+
+
 def transfers_required(dataset=None):
     c = AlyxClient()
-    if not dataset:
-        files = c.get('/files', exists=False)
-    else:
-        files = c.get('/files', exists=False, dataset=dataset)
-    files = sorted(files, key=itemgetter('dataset'))
-    files = files[-10:]
+    files = _get_files(c, dataset=dataset, exists=False)
     for dataset, missing_files in groupby(files, itemgetter('dataset')):
         existing_files = c.get('/files', dataset=_extract_uuid(dataset), exists=True)
         if not existing_files:
             continue
-        existing_file = existing_files[0]
+        existing_file = next((_ for _ in existing_files if _['is_personal'] is False), None)
+        if existing_file is None:
+            logger.warn("There is no file record on a non-personal globus endpoint "
+                        "for the dataset %s", dataset)
+            continue
         for missing_file in missing_files:
             assert existing_file['exists']
             assert not missing_file['exists']
@@ -374,6 +384,36 @@ def transfer(ctx, source=None, destination=None, all=False, dataset=None, dry_ru
         start_globus_transfer(file['source_file_record'],
                               file['destination_file_record'],
                               dry_run=dry_run)
+
+
+@alyx.command()
+@click.argument('dataset', required=False)
+@click.option('--dry-run', is_flag=True,
+              help='Just display the actions instead of executing them')
+@click.pass_context
+def sync(ctx, dataset=None, dry_run=False):
+    dataset = _extract_uuid(dataset)
+
+    c = AlyxClient()
+    tc = globus_transfer_client()
+
+    files = _get_files(c, dataset=dataset, exists=False)
+    for dataset, missing_files in groupby(files, itemgetter('dataset')):
+        for file in missing_files:
+            name = op.basename(file['relative_path'])
+            # TODO: cache this in memory
+            repo_obj = c.get('/data-repository/' + file['data_repository'])
+            globus_id = repo_obj['globus_endpoint_id']
+            # List all files on the endpoint in that directory.
+            existing = tc.operation_ls(globus_id, path=op.dirname(file['relative_path']))
+            for existing_file in existing:
+                if existing_file['name'] == name and existing_file['size'] > 0:
+                    # If the file exists and is not empty, we update alyx.
+                    logger.info("File record exists on %s, updating alyx.",
+                                file['data_repository'])
+                    c.patch('/files/' + file['id'], exists=True)
+                    click.echo(_simple_table(c.get('/files/' + file['id'])))
+                    continue
 
 
 @alyx.command()
