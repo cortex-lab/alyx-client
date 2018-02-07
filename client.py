@@ -1,3 +1,4 @@
+from getpass import getpass
 from itertools import groupby
 import json
 import logging
@@ -379,6 +380,8 @@ def transfer(ctx, source=None, destination=None, all=False, dataset=None, dry_ru
         start_globus_transfer(source, destination, dry_run=dry_run)
         return
 
+    if dataset is None:
+        assert all is not None
     dataset = _extract_uuid(dataset)
     for file in transfers_required(dataset):
         start_globus_transfer(file['source_file_record'],
@@ -388,10 +391,14 @@ def transfer(ctx, source=None, destination=None, all=False, dataset=None, dry_ru
 
 @alyx.command()
 @click.argument('dataset', required=False)
+@click.option('--all', is_flag=True, help='Process all missing file records')
 @click.option('--dry-run', is_flag=True,
               help='Just display the actions instead of executing them')
 @click.pass_context
-def sync(ctx, dataset=None, dry_run=False):
+def sync(ctx, dataset=None, all=None, dry_run=False):
+    # Need to use --all if no dataset is provided.
+    if dataset is None:
+        assert all is not None
     dataset = _extract_uuid(dataset)
 
     c = AlyxClient()
@@ -425,6 +432,18 @@ def status(ctx, task_id):
     keys = ('status,label,source_endpoint_display_name,destination_endpoint_display_name,'
             'request_time,completion_time,files,bytes_transferred').split(',')
     click.echo(_simple_table({k: result[k] for k in keys}))
+
+
+@alyx.command()
+@click.pass_context
+def login(ctx):
+    if click.confirm("Logging to Alyx?"):
+        username = click.prompt("Alyx username")
+        password = getpass("Alyx password:")
+        with open(op.expanduser('~/.alyx/credentials'), 'w') as f:
+            f.write(f'{username}:{password}')
+    if click.confirm("Logging to Globus?"):
+        create_globus_token()
 
 
 if __name__ == '__main__':
