@@ -76,6 +76,8 @@ def _pp(value):
 
 
 def _simple_table(data):
+    if isinstance(data, str):
+        return data
     assert isinstance(data, dict)
     table = [[key, _pp(value)] for key, value in data.items()]
     st = AsciiTable(table)
