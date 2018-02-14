@@ -19,8 +19,8 @@ $ alyx patch /subject/uuid field=value
 # Transfer a file record from another using globus.
 $ alyx transfer <source_file_record_uuid> <destination_file_record_uuid>
 
-# Transfer all file records associated to a dataset (assuming there is at least one file record
-# on a non-personal globus endpoint).
+# Transfer all file records associated to a dataset (assuming there is at least one
+# existing file record).
 $ alyx transfer --dataset <dataset_uuid>
 
 # Transfer all file records that are missing.
