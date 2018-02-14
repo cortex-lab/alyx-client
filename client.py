@@ -1,5 +1,6 @@
 from getpass import getpass
 from itertools import groupby
+import functools
 import json
 import logging
 from operator import itemgetter
@@ -24,7 +25,7 @@ logger.setLevel(logging.INFO)
 
 
 BASE_URL = 'https://alyx-dev.cortexlab.net/'
-BASE_URL = 'http://localhost:8000/'  # test
+BASE_URL = 'http://localhost:8000/'  # DEBUG
 CONFIG_PATH = '~/.alyx'
 GLOBUS_CLIENT_ID = '525cc517-8ccb-4d11-8036-af332da5eafd'
 TABLE_WIDTH = '{0: <72}'
@@ -245,6 +246,16 @@ def _get_files(c, dataset=None, exists=None):
     return files
 
 
+DATA_REPOSITORIES = {}
+
+
+def _get_data_repository(c, f):
+    repo = f['data_repository']
+    if repo not in DATA_REPOSITORIES:
+        DATA_REPOSITORIES[repo] = c.get('/data-repository/' + repo)
+    return DATA_REPOSITORIES[repo]
+
+
 def transfers_required(dataset=None):
     c = AlyxClient()
     files = _get_files(c, dataset=dataset, exists=False)
@@ -252,14 +263,24 @@ def transfers_required(dataset=None):
         existing_files = c.get('/files', dataset=_extract_uuid(dataset), exists=True)
         if not existing_files:
             continue
-        existing_file = next((_ for _ in existing_files if _['is_personal'] is False), None)
+        # If possible, choose a file from a non-personal server.
+        existing_file = next(
+            (f for f in existing_files if _get_data_repository(c, f)['globus_is_personal'] is False),
+            None)
         if existing_file is None:
-            logger.warn("There is no file record on a non-personal globus endpoint "
-                        "for the dataset %s", dataset)
-            continue
+            # Otherwise, fallback on a personal server. But the destination should not
+            # be a personal server as well.
+            existing_file = existing_files[0]
         for missing_file in missing_files:
             assert existing_file['exists']
             assert not missing_file['exists']
+            # WARNING: we should check that the destination data_repository is not personal if
+            # the source repository is personal.
+            if (_get_data_repository(c, missing_file)['globus_is_personal'] and
+                    _get_data_repository(c, existing_file)['globus_is_personal']):
+                logger.warn("Our globus subscription does not support file transfer between two "
+                            "personal servers.")
+                continue
             yield {
                 'dataset': dataset,
                 'source_data_repository': existing_file['data_repository'],
@@ -314,6 +335,10 @@ def globus_transfer_client():
     return tc
 
 
+def _escape_label(label):
+    return re.sub(r'[^a-zA-Z0-9 \-]', '-', label)
+
+
 def start_globus_transfer(source_file_id, destination_file_id, dry_run=False):
     """Start a globus file transfer between two file record UUIDs."""
     c = AlyxClient()
@@ -324,8 +349,8 @@ def start_globus_transfer(source_file_id, destination_file_id, dry_run=False):
     source_repo = source_file_record['data_repository']
     destination_repo = destination_file_record['data_repository']
 
-    source_repo_obj = c.get('/data-repository/' + source_repo)
-    destination_repo_obj = c.get('/data-repository/' + destination_repo)
+    source_repo_obj = _get_data_repository(c, source_file_record)
+    destination_repo_obj = _get_data_repository(c, destination_file_record)
 
     source_id = source_repo_obj['globus_endpoint_id']
     destination_id = destination_repo_obj['globus_endpoint_id']
@@ -336,11 +361,14 @@ def start_globus_transfer(source_file_id, destination_file_id, dry_run=False):
     source_path = source_file_record['relative_path']
     destination_path = destination_file_record['relative_path']
 
-    label = 'Transfer %s:%s to %s/%s' % (
-        source_path.replace('.', '-').replace('/', '-'),
+    source_path = op.join(source_repo_obj['path'], source_path)
+    destination_path = op.join(destination_repo_obj['path'], destination_path)
+
+    label = 'Transfer %s %s to %s %s' % (
         source_repo,
-        destination_path.replace('.', '-').replace('/', '-'),
+        _escape_label(source_path),
         destination_repo,
+        _escape_label(destination_path),
     )
     tc = globus_transfer_client()
     tdata = globus_sdk.TransferData(
@@ -348,9 +376,6 @@ def start_globus_transfer(source_file_id, destination_file_id, dry_run=False):
         label=label,
     )
     tdata.add_item(source_path, destination_path)
-
-    # DEBUG
-    dry_run = True
 
     logger.info("Transfer from %s <%s> to %s <%s>%s.",
                 source_repo, source_path, destination_repo, destination_path,
@@ -410,18 +435,23 @@ def sync(ctx, dataset=None, all=None, dry_run=False):
     for dataset, missing_files in groupby(files, itemgetter('dataset')):
         for file in missing_files:
             name = op.basename(file['relative_path'])
-            # TODO: cache this in memory
-            repo_obj = c.get('/data-repository/' + file['data_repository'])
+            repo_obj = _get_data_repository(c, file)
             globus_id = repo_obj['globus_endpoint_id']
             # List all files on the endpoint in that directory.
-            existing = tc.operation_ls(globus_id, path=op.dirname(file['relative_path']))
+            path = op.join(repo_obj['path'], op.dirname(file['relative_path']))
+            try:
+                existing = tc.operation_ls(globus_id, path=path)
+            except globus_sdk.exc.TransferAPIError as e:
+                logger.warn(e)
+                continue
             for existing_file in existing:
                 if existing_file['name'] == name and existing_file['size'] > 0:
                     # If the file exists and is not empty, we update alyx.
-                    logger.info("File record exists on %s, updating alyx.",
-                                file['data_repository'])
-                    c.patch('/files/' + file['id'], exists=True)
-                    click.echo(_simple_table(c.get('/files/' + file['id'])))
+                    logger.info("File record exists on %s, updating alyx%s.",
+                                (file['data_repository'], ' (dry)' if dry_run else ''))
+                    if not dry_run:
+                        c.patch('/files/' + file['id'], exists=True)
+                        click.echo(_simple_table(c.get('/files/' + file['id'])))
                     continue
 
 
