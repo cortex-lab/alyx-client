@@ -121,7 +121,7 @@ class AlyxClient:
     def _request(self, url, method, **kwargs):
         if not url.startswith('http'):
             url = self._make_end_point(url)
-        for i in range(3):
+        for i in range(2):
             if self._token:
                 kwargs['headers'] = {'Authorization': 'Token ' + self._token}
             logger.debug(f"{method.upper()} request to {url} with data {kwargs}")
@@ -133,6 +133,8 @@ class AlyxClient:
                 return resp
             elif resp.status_code == 404:
                 raise Exception("The REST endpoint %s doesn't exist." % url)
+            else:
+                raise Exception(resp.text)
         raise Exception(resp.text)
 
     def get(self, url, **data):
