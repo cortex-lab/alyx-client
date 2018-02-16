@@ -98,7 +98,7 @@ def get_table(data):
         table = [[key for key in keys]]
         st = AsciiTable(table)
         for item in data:
-            table.append([item[key] for key in keys])
+            table.append([_pp(item[key]) for key in keys])
         st.inner_heading_row_border = False
         if st.table_width <= twidth:
             return st.table
@@ -181,18 +181,11 @@ class AlyxClient:
 
 
 @click.group()
+@click.option('--raw', is_flag=True)
 @click.pass_context
-def alyx(ctx):
+def alyx(ctx, raw=False):
     ctx.obj['client'] = AlyxClient()
-
-    """
-    tool ls --session=...  # list datasets
-            --status=pending/uploading/done
-        <dataset>    date    ...    file_record_1  file_record_2   status
-    tool upload --status=pending
-    """
-
-    pass
+    ctx.obj['raw'] = raw
 
 
 def _request(name, ctx, path, kvpairs):
@@ -202,7 +195,11 @@ def _request(name, ctx, path, kvpairs):
         key, value = kvpair[:i], kvpair[i + 1:]
         data[key] = value
     client = ctx.obj['client']
-    click.echo(get_table(getattr(client, name)(path, **data)))
+    out = getattr(client, name)(path, **data)
+    if ctx.obj.get('raw', None):
+        click.echo(out)
+    else:
+        click.echo(get_table(out))
 
 
 @alyx.command()
