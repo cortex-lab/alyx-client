@@ -69,6 +69,8 @@ def _extract_uuid(url):
 
 
 def _pp(value):
+    if isinstance(value, dict):
+        value = [value]
     if isinstance(value, list):
         out = '\n'.join((_simple_table(row)) for row in value)
         return '\n'.join(TABLE_WIDTH.format(line) for line in out.splitlines())
