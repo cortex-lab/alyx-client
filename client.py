@@ -169,7 +169,7 @@ class AlyxClient:
             raise Exception(resp)
 
     def _auth(self, username, password):
-        url = self._make_end_point('/auth-token/')
+        url = self._make_end_point('/auth-token')
         resp = self.post(url, username=username, password=password)
         if not resp:
             return
